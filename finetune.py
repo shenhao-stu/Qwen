@@ -12,7 +12,8 @@ from torch.utils.data import Dataset
 from deepspeed import zero
 from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 import transformers
-from transformers import Trainer, GPTQConfig, deepspeed
+from transformers import Trainer, GPTQConfig
+from transformers.integrations import is_deepspeed_zero3_enabled
 from transformers.trainer_pt_utils import LabelSmoother
 from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
 from accelerate.utils import DistributedType
@@ -63,6 +64,7 @@ class LoraArguments:
     q_lora: bool = False
 
 
+# Borrowed from peft.utils.maybe_zero_3
 def maybe_zero_3(param):
     if hasattr(param, "ds_id"):
         assert param.ds_status == ZeroParamStatus.NOT_AVAILABLE
@@ -74,6 +76,7 @@ def maybe_zero_3(param):
 
 
 # Borrowed from peft.utils.get_peft_model_state_dict
+# This function is used to get the state dict of the model with QLoRA.
 def get_peft_state_maybe_zero_3(named_params, bias):
     if bias == "none":
         to_return = {k: t for k, t in named_params if "lora_" in k}
@@ -109,7 +112,7 @@ def rank0_print(*args):
 def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: str, bias="none"):
     """Collects the state dict and dump to disk."""
     # check if zero3 mode enabled
-    if deepspeed.is_deepspeed_zero3_enabled():
+    if is_deepspeed_zero3_enabled():
         state_dict = trainer.model_wrapped._zero3_consolidated_16bit_state_dict()
     else:
         if trainer.args.use_lora:
@@ -122,12 +125,14 @@ def safe_save_model_for_hf_trainer(trainer: transformers.Trainer, output_dir: st
         trainer._save(output_dir, state_dict=state_dict)
 
 
+# TODO: This function is used to preprocess the data for supervised fine-tuning.
 def preprocess(
     sources,
     tokenizer: transformers.PreTrainedTokenizer,
     max_len: int,
     system_message: str = "You are a helpful assistant."
 ) -> Dict:
+    """Preprocess the data for supervised fine-tuning."""
     roles = {"user": "<|im_start|>user", "assistant": "<|im_start|>assistant"}
 
     im_start = tokenizer.im_start_id
@@ -146,7 +151,7 @@ def preprocess(
         input_id, target = [], []
         system = [im_start] + _system + tokenizer(system_message).input_ids + [im_end] + nl_tokens
         input_id += system
-        target += [im_start] + [IGNORE_TOKEN_ID] * (len(system)-3) + [im_end] + nl_tokens
+        target += [im_start] + [IGNORE_TOKEN_ID] * (len(system)-3) + [im_end] + nl_tokens # '<|im_start|>''<|im_end|>''\n' accounts for three tokens
         assert len(input_id) == len(target)
         for j, sentence in enumerate(source):
             role = roles[sentence["from"]]
@@ -154,10 +159,10 @@ def preprocess(
                 tokenizer(sentence["value"]).input_ids + [im_end] + nl_tokens
             input_id += _input_id
             if role == '<|im_start|>user':
-                _target = [im_start] + [IGNORE_TOKEN_ID] * (len(_input_id)-3) + [im_end] + nl_tokens
+                _target = [im_start] + [IGNORE_TOKEN_ID] * (len(_input_id)-3) + [im_end] + nl_tokens # _input_id = [151644, 872, 198, 108386, 151645, 198] _target = [151644, -100, -100, -100, 151645, 198]
             elif role == '<|im_start|>assistant':
                 _target = [im_start] + [IGNORE_TOKEN_ID] * len(tokenizer(role).input_ids) + \
-                    _input_id[len(tokenizer(role).input_ids)+1:-2] + [im_end] + nl_tokens
+                    _input_id[len(tokenizer(role).input_ids)+1:-2] + [im_end] + nl_tokens  # _input_id = [151644, 77091, 198, 35946, 101909, ...] _target = [151644, -100, -100, 35946, 101909, 102064, 104949, ...]
             else:
                 raise NotImplementedError
             target += _target
@@ -172,7 +177,7 @@ def preprocess(
     return dict(
         input_ids=input_ids,
         labels=targets,
-        attention_mask=input_ids.ne(tokenizer.pad_token_id),
+        attention_mask=input_ids.ne(tokenizer.pad_token_id), # [True, ..., True, False, ..., False]
     )
 
 
@@ -183,6 +188,7 @@ class SupervisedDataset(Dataset):
         super(SupervisedDataset, self).__init__()
 
         rank0_print("Formatting inputs...")
+        # sources = [example["conversation"] for example in raw_data] # MODIFIED
         sources = [example["conversations"] for example in raw_data]
         data_dict = preprocess(sources, tokenizer, max_len)
 
@@ -200,7 +206,7 @@ class SupervisedDataset(Dataset):
             attention_mask=self.attention_mask[i],
         )
 
-
+# This class is used to load data in lazy mode.
 class LazySupervisedDataset(Dataset):
     """Dataset for supervised fine-tuning."""
 
@@ -217,6 +223,7 @@ class LazySupervisedDataset(Dataset):
     def __len__(self):
         return len(self.raw_data)
 
+    # Process and cache data only when needed
     def __getitem__(self, i) -> Dict[str, torch.Tensor]:
         if i in self.cached_data_dict:
             return self.cached_data_dict[i]
@@ -241,7 +248,11 @@ def make_supervised_data_module(
     )
     rank0_print("Loading data...")
 
-    train_json = json.load(open(data_args.data_path, "r"))
+    # TODO: add some funtions to load data from csv, excel, json, jsonl, etc.
+    if 'jsonl' in data_args.data_path:
+        train_json = [json.loads(line) for line in open(data_args.data_path, "r")]
+    else:
+        train_json = json.load(open(data_args.data_path, "r"))
     train_dataset = dataset_cls(train_json, tokenizer=tokenizer, max_len=max_len)
 
     if data_args.eval_data_path:
@@ -259,28 +270,27 @@ def train():
     parser = transformers.HfArgumentParser(
         (ModelArguments, DataArguments, TrainingArguments, LoraArguments)
     )
-    (
-        model_args,
-        data_args,
-        training_args,
-        lora_args,
-    ) = parser.parse_args_into_dataclasses()
+    
+    model_args, data_args, training_args, lora_args = parser.parse_args_into_dataclasses()
 
     # This serves for single-gpu qlora.
     if getattr(training_args, 'deepspeed', None) and int(os.environ.get("WORLD_SIZE", 1))==1:
         training_args.distributed_state.distributed_type = DistributedType.DEEPSPEED
 
     local_rank = training_args.local_rank
-
-    device_map = "auto"
-    world_size = int(os.environ.get("WORLD_SIZE", 1))
+    # Set parameters in distributed training
+    device_map = "auto" # Equipment(CPU or GPU) for model training
+    world_size = int(os.environ.get("WORLD_SIZE", 1)) # Number of processes used for distributed training
     ddp = world_size != 1
+    # This code is mainly used to set the device mapping when QLoRA is enabled, and check whether other optimizations incompatible with QLoRA are enabled.
     if lora_args.q_lora:
         device_map = {"": int(os.environ.get("LOCAL_RANK") or 0)} if ddp else "auto"
-        if len(training_args.fsdp) > 0 or deepspeed.is_deepspeed_zero3_enabled():
+        if len(training_args.fsdp) > 0 or is_deepspeed_zero3_enabled():
             logging.warning(
                 "FSDP or ZeRO3 are incompatible with QLoRA."
             )
+    if ddp:
+        device_map = {"": int(os.environ.get("LOCAL_RANK") or 0)}
 
     # Set RoPE scaling factor
     config = transformers.AutoConfig.from_pretrained(
@@ -295,23 +305,24 @@ def train():
         model_args.model_name_or_path,
         config=config,
         cache_dir=training_args.cache_dir,
-        device_map=device_map,
+        device_map=device_map if not is_deepspeed_zero3_enabled() else None,
+        low_cpu_mem_usage=(not is_deepspeed_zero3_enabled()),
         trust_remote_code=True,
         quantization_config=GPTQConfig(
             bits=4, disable_exllama=True
         )
-        if training_args.use_lora and lora_args.q_lora
+        if training_args.use_lora and lora_args.q_lora # This code is used to set the quantization configuration when QLoRA is enabled.
         else None,
     )
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
         model_max_length=training_args.model_max_length,
-        padding_side="right",
-        use_fast=False,
+        padding_side="right", # Padding position
+        use_fast=False, # Whether to use fast tokenizer
         trust_remote_code=True,
     )
-    tokenizer.pad_token_id = tokenizer.eod_id
+    tokenizer.pad_token_id = tokenizer.eod_id # Padding token ID: End of Document
 
     if training_args.use_lora:
         if lora_args.q_lora or 'chat' in model_args.model_name_or_path.lower():
@@ -332,11 +343,13 @@ def train():
                 model, use_gradient_checkpointing=training_args.gradient_checkpointing
             )
 
-        model = get_peft_model(model, lora_config)
+        model = get_peft_model(model, lora_config) # Get the modified model with QLoRA
 
         # Print peft trainable params
         model.print_trainable_parameters()
+        # Out: trainable params: 1,780,285,440 || all params: 15,947,576,320 || trainable%: 11.163360527501148
 
+        # Gradient checkpointing
         if training_args.gradient_checkpointing:
             model.enable_input_require_grads()
 
@@ -358,3 +371,111 @@ def train():
 
 if __name__ == "__main__":
     train()
+
+""" 
+# model:
+PeftModelForCausalLM(
+  (base_model): LoraModel(
+    (model): QWenLMHeadModel(
+      (transformer): QWenModel(
+        (wte): ModulesToSaveWrapper(
+          (original_module): Embedding(152064, 5120)
+          (modules_to_save): ModuleDict(
+            (default): Embedding(152064, 5120)
+          )
+        )
+        (drop): Dropout(p=0.0, inplace=False)
+        (rotary_emb): RotaryEmbedding()
+        (h): ModuleList(
+          (0-39): 40 x QWenBlock(
+            (ln_1): RMSNorm()
+            (attn): QWenAttention(
+              (c_attn): lora.Linear(
+                (base_layer): Linear(in_features=5120, out_features=15360, bias=True)
+                (lora_dropout): ModuleDict(
+                  (default): Dropout(p=0.05, inplace=False)
+                )
+                (lora_A): ModuleDict(
+                  (default): Linear(in_features=5120, out_features=64, bias=False)
+                )
+                (lora_B): ModuleDict(
+                  (default): Linear(in_features=64, out_features=15360, bias=False)
+                )
+                (lora_embedding_A): ParameterDict()
+                (lora_embedding_B): ParameterDict()
+              )
+              (c_proj): lora.Linear(
+                (base_layer): Linear(in_features=5120, out_features=5120, bias=False)
+                (lora_dropout): ModuleDict(
+                  (default): Dropout(p=0.05, inplace=False)
+                )
+                (lora_A): ModuleDict(
+                  (default): Linear(in_features=5120, out_features=64, bias=False)
+                )
+                (lora_B): ModuleDict(
+                  (default): Linear(in_features=64, out_features=5120, bias=False)
+                )
+                (lora_embedding_A): ParameterDict()
+                (lora_embedding_B): ParameterDict()
+              )
+              (core_attention_flash): FlashSelfAttention()
+              (attn_dropout): Dropout(p=0.0, inplace=False)
+            )
+            (ln_2): RMSNorm()
+            (mlp): QWenMLP(
+              (w1): lora.Linear(
+                (base_layer): Linear(in_features=5120, out_features=13696, bias=False)
+                (lora_dropout): ModuleDict(
+                  (default): Dropout(p=0.05, inplace=False)
+                )
+                (lora_A): ModuleDict(
+                  (default): Linear(in_features=5120, out_features=64, bias=False)
+                )
+                (lora_B): ModuleDict(
+                  (default): Linear(in_features=64, out_features=13696, bias=False)
+                )
+                (lora_embedding_A): ParameterDict()
+                (lora_embedding_B): ParameterDict()
+              )
+              (w2): lora.Linear(
+                (base_layer): Linear(in_features=5120, out_features=13696, bias=False)
+                (lora_dropout): ModuleDict(
+                  (default): Dropout(p=0.05, inplace=False)
+                )
+                (lora_A): ModuleDict(
+                  (default): Linear(in_features=5120, out_features=64, bias=False)
+                )
+                (lora_B): ModuleDict(
+                  (default): Linear(in_features=64, out_features=13696, bias=False)
+                )
+                (lora_embedding_A): ParameterDict()
+                (lora_embedding_B): ParameterDict()
+              )
+              (c_proj): lora.Linear(
+                (base_layer): Linear(in_features=13696, out_features=5120, bias=False)
+                (lora_dropout): ModuleDict(
+                  (default): Dropout(p=0.05, inplace=False)
+                )
+                (lora_A): ModuleDict(
+                  (default): Linear(in_features=13696, out_features=64, bias=False)
+                )
+                (lora_B): ModuleDict(
+                  (default): Linear(in_features=64, out_features=5120, bias=False)
+                )
+                (lora_embedding_A): ParameterDict()
+                (lora_embedding_B): ParameterDict()
+              )
+            )
+          )
+        )
+        (ln_f): RMSNorm()
+      )
+      (lm_head): ModulesToSaveWrapper(
+        (original_module): Linear(in_features=5120, out_features=152064, bias=False)
+        (modules_to_save): ModuleDict(
+          (default): Linear(in_features=5120, out_features=152064, bias=False)
+        )
+      )
+    )
+  )
+) """

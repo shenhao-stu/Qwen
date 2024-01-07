@@ -3,9 +3,10 @@ export CUDA_DEVICE_MAX_CONNECTIONS=1
 DIR=`pwd`
 
 MODEL="Qwen/Qwen-7B-Chat-Int4" # Set the path if you do not want to load from huggingface directly
+OUTPUT_DIR="output_model/Qwen-7B-sft" # Set the path to save the trained model
 # ATTENTION: specify the path to your training data, which should be a json file consisting of a list of conversations.
 # See the section for finetuning in README for more information.
-DATA="path_to_data"
+DATA="data/qwen_demo.json"
 
 function usage() {
     echo '
@@ -42,7 +43,7 @@ python finetune.py \
   --model_name_or_path $MODEL \
   --data_path $DATA \
   --fp16 True \
-  --output_dir output_qwen \
+  --output_dir $OUTPUT_DIR \
   --num_train_epochs 5 \
   --per_device_train_batch_size 2 \
   --per_device_eval_batch_size 1 \
