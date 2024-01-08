@@ -22,7 +22,7 @@ OUTPUT_DIR="output_model/Qwen-7B-sft" # Set the path to save the trained model
 # ATTENTION: specify the path to your training data, which should be a json file consisting of a list of conversations.
 # See the section for finetuning in README for more information.
 DATA="data/qwen_demo.json"
-DS_CONFIG_PATH="finetune/ds_config_zero3.json"
+DS_CONFIG_PATH="ds_configs/ds_config_zero3.json"
 
 function usage() {
     echo '
@@ -84,5 +84,6 @@ torchrun $DISTRIBUTED_ARGS finetune.py \
     --report_to "none" \
     --model_max_length 512 \
     --lazy_preprocess True \
+    --use_lora \
     --gradient_checkpointing \
     --deepspeed ${DS_CONFIG_PATH}

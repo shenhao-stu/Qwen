@@ -83,4 +83,4 @@ torchrun $DISTRIBUTED_ARGS finetune.py \
     --use_lora \
     --q_lora \
     --gradient_checkpointing \
-    --deepspeed finetune/ds_config_zero2.json
+    --deepspeed ds_configs/ds_config_zero2.json

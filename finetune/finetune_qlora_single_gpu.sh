@@ -64,4 +64,4 @@ python finetune.py \
   --gradient_checkpointing \
   --use_lora \
   --q_lora \
-  --deepspeed finetune/ds_config_zero2.json
+  --deepspeed ds_configs/ds_config_zero2.json

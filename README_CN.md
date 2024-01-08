@@ -774,7 +774,7 @@ print(response)
 
 对于 Qwen-7B，我们额外测试了多机微调的性能。我们在两台服务器上运行评测，每台服务器包含两张A100-SXM4-80G GPU，其余配置与Qwen-7B的其他评测相同。多机微调的结果在表中以 LoRA (multinode) 标示。
 
-对于 Qwen-72B，我们测试了两种方案：1）使用4个 A100-SXM4-80G GPUs，通过 Lora + DeepSpeed ZeRO 3 微调和2）使用单张A100-SXM4-80G GPU，通过 QLora (int4) 微调。请注意，使用 LoRA (emb) 微调和不带 DeepSpeed ZeRO 3 的 LoRA 微调在4个A100-SXM4-80G GPUs 上都会出现OOM（你可以通过将`--deepspeed finetune/ds_config_zero3.json`参数传给[`finetune/finetune_lora_ds.sh`](finetune/finetune_lora_ds.sh)来打开 DeepSpeed ZeRO 3 配置）。
+对于 Qwen-72B，我们测试了两种方案：1）使用4个 A100-SXM4-80G GPUs，通过 Lora + DeepSpeed ZeRO 3 微调和2）使用单张A100-SXM4-80G GPU，通过 QLora (int4) 微调。请注意，使用 LoRA (emb) 微调和不带 DeepSpeed ZeRO 3 的 LoRA 微调在4个A100-SXM4-80G GPUs 上都会出现OOM（你可以通过将`--deepspeed ds_configs/ds_config_zero3.json`参数传给[`finetune/finetune_lora_ds.sh`](finetune/finetune_lora_ds.sh)来打开 DeepSpeed ZeRO 3 配置）。
 
 具体数值如下所示：
 

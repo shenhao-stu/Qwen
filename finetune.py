@@ -328,7 +328,8 @@ def train():
         if lora_args.q_lora or 'chat' in model_args.model_name_or_path.lower():
             modules_to_save = None
         else:
-            modules_to_save = ["wte", "lm_head"]
+            # modules_to_save = ["wte", "lm_head"]
+            modules_to_save = ["wte", "lm_head"] if not is_deepspeed_zero3_enabled() else None
         lora_config = LoraConfig(
             r=lora_args.lora_r,
             lora_alpha=lora_args.lora_alpha,
