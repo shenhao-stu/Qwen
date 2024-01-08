@@ -292,6 +292,19 @@ def train():
     if ddp:
         device_map = {"": int(os.environ.get("LOCAL_RANK") or 0)}
 
+    is_chat_model = 'chat' in model_args.model_name_or_path.lower()
+    if (
+            training_args.use_lora
+            and not lora_args.q_lora
+            and deepspeed.is_deepspeed_zero3_enabled()
+            and not is_chat_model
+    ):
+        raise RuntimeError("ZeRO3 is incompatible with LoRA when finetuning on base model.")
+
+    model_load_kwargs = {}
+    if deepspeed.is_deepspeed_zero3_enabled():
+        model_load_kwargs['low_cpu_mem_usage'] = False
+
     # Set RoPE scaling factor
     config = transformers.AutoConfig.from_pretrained(
         model_args.model_name_or_path,
@@ -313,6 +326,7 @@ def train():
         )
         if training_args.use_lora and lora_args.q_lora # This code is used to set the quantization configuration when QLoRA is enabled.
         else None,
+        **model_load_kwargs,
     )
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
@@ -325,7 +339,7 @@ def train():
     tokenizer.pad_token_id = tokenizer.eod_id # Padding token ID: End of Document
 
     if training_args.use_lora:
-        if lora_args.q_lora or 'chat' in model_args.model_name_or_path.lower():
+        if lora_args.q_lora or is_chat_model:
             modules_to_save = None
         else:
             # modules_to_save = ["wte", "lm_head"]

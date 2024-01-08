@@ -17,6 +17,12 @@ NNODES=${NNODES:-1}
 # The rank of this worker, should be in {0, ..., WORKER_CNT-1}, for single-worker training, please set to 0
 NODE_RANK=${NODE_RANK:-0}
 
+# The ip address of the rank-0 worker, for single-worker training, please set to localhost
+MASTER_ADDR=${MASTER_ADDR:-localhost}
+
+# The port for communication
+MASTER_PORT=${MASTER_PORT:-6001}
+
 MODEL="Qwen/Qwen-7B" # Set the path if you do not want to load from huggingface directly
 OUTPUT_DIR="output_model/Qwen-7B-sft" # Set the path to save the trained model
 # ATTENTION: specify the path to your training data, which should be a json file consisting of a list of conversations.
@@ -59,7 +65,9 @@ done
 DISTRIBUTED_ARGS="
     --nproc_per_node $GPUS_PER_NODE \
     --nnodes $NNODES \
-    --node_rank $NODE_RANK
+    --node_rank $NODE_RANK \
+    --master_addr $MASTER_ADDR \
+    --master_port $MASTER_PORT
 "
 
 torchrun $DISTRIBUTED_ARGS finetune.py \
