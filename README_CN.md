@@ -446,15 +446,9 @@ response, history = model.chat(tokenizer, "Hi", history=None)
 <br>
 
 
-<<<<<<< HEAD
 ### KV cache量化
-=======
-> NOTE: Please be aware that due to the internal mechanism of Hugging Face, the support files for this functionality 
-> (i.e., `cache_autogptq_cuda_256.cpp` and `cache_autogptq_cuda_kernel_256.cu`) may be missing. Please manually download
-> them from the Hugging Face Hub and place them into the same folder as the other module files.
->>>>>>> official/main
 
-> 注意：由于Hugging Face的内部实现，本功能的支持文件`cache_autogptq_cuda_356.cpp`与`cache_autogptq_cuda_kernel_245.cu`可能没被下载。如需开启使用，请手动从相关位置下载，并放置到相应文件中。
+> 注意：由于Hugging Face的内部实现，本功能的支持文件`cache_autogptq_cuda_256.cpp`与`cache_autogptq_cuda_kernel_256.cu`可能没被下载。如需开启使用，请手动从相关位置下载，并放置到相应文件中。
 
 在模型推理时，我们可以将中间结果key以及value的值量化后压缩存储，这样便可以在相同的卡上存储更多的key以及value，增加样本吞吐。
 
@@ -774,18 +768,13 @@ print(response)
 
 注意： DeepSpeed ZeRO 3 对节点间通信速率的要求远大于 ZeRO 2，在多机微调的情况下会大幅降低训练速度。因此，我们不建议在多机微调的情况下使用 DeepSpeed ZeRO 3 配置。
 
-<<<<<<< HEAD
 ### 显存占用及训练速度
 
 下面记录7B和14B模型在单GPU使用LoRA（LoRA (emb)指的是embedding和输出层参与训练，而LoRA则不优化这部分参数）和QLoRA时处理不同长度输入的显存占用和训练速度的情况。本次评测运行于单张A100-SXM4-80G GPU，使用CUDA 11.8和Pytorch 2.0，并使用了flash attention 2。我们统一使用batch size为1，gradient accumulation为8的训练配置，记录输入长度分别为256、512、1024、2048、4096和8192的显存占用（GB）和训练速度（s/iter）。我们还使用2张A100测了Qwen-7B的全参数微调。受限于显存大小，我们仅测试了256、512和1024token的性能。
-=======
-### Profiling of Memory and Speed
-We profile the GPU memory and training speed of both LoRA (LoRA (emb) refers to training the embedding and output layer, while LoRA has no trainable embedding and output layer) and Q-LoRA in the setup of single-GPU training. In this test, we experiment on a single A100-SXM4-80G GPU, and we use CUDA 11.8 and Pytorch 2.0. Flash attention 2 is applied. We uniformly use a batch size of 1 and gradient accumulation of 8. We profile the memory (GB) and speed (s/iter) of inputs of different lengths, namely 256, 512, 1024, 2048, 4096, and 8192. We also report the statistics of full-parameter finetuning with Qwen-7B on 2 A100 GPUs. We only report the statistics of 256, 512, and 1024 tokens due to the limitation of GPU memory. 
->>>>>>> official/main
 
 对于 Qwen-7B，我们额外测试了多机微调的性能。我们在两台服务器上运行评测，每台服务器包含两张A100-SXM4-80G GPU，其余配置与Qwen-7B的其他评测相同。多机微调的结果在表中以 LoRA (multinode) 标示。
 
-对于 Qwen-72B，我们测试了两种方案：1）使用4个 A100-SXM4-80G GPUs，通过 Lora + DeepSpeed ZeRO 3 微调和2）使用单张A100-SXM4-80G GPU，通过 QLora (int4) 微调。请注意，使用 LoRA (emb) 微调和不带 DeepSpeed ZeRO 3 的 LoRA 微调在4个A100-SXM4-80G GPUs 上都会出现OOM（你可以通过将`--deepspeed ds_configs/ds_config_zero3.json`参数传给[`finetune/finetune_lora_ds.sh`](finetune/finetune_lora_ds.sh)来打开 DeepSpeed ZeRO 3 配置）。
+对于 Qwen-72B，我们测试了两种方案：1）使用4个 A100-SXM4-80G GPUs，通过 Lora + DeepSpeed ZeRO 3 微调和2）使用单张A100-SXM4-80G GPU，通过 QLora (int4) 微调。请注意，使用 LoRA (emb) 微调和不带 DeepSpeed ZeRO 3 的 LoRA 微调在4个A100-SXM4-80G GPUs 上都会出现OOM（你可以通过将`--deepspeed finetune/ds_config_zero3.json`参数传给[`finetune/finetune_lora_ds.sh`](finetune/finetune_lora_ds.sh)来打开 DeepSpeed ZeRO 3 配置）。
 
 具体数值如下所示：
 
@@ -874,14 +863,10 @@ We profile the GPU memory and training speed of both LoRA (LoRA (emb) refers to 
 
 <br>
 
-<<<<<<< HEAD
 ## 部署
 
 ### vLLM
 如希望部署及加速推理，我们建议你使用vLLM。
-=======
-## Deployment
->>>>>>> official/main
 
 如果你使用cuda12.1和pytorch2.1，可以直接使用以下命令安装vLLM。
 
